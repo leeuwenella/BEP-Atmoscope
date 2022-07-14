@@ -13,14 +13,10 @@ from numba import jit
 from tqdm import tqdm
 from scipy.optimize import curve_fit
 
-
+plt.close()
 eta= 0.000273
 H=8.5e3
 R= 6.371e6
-C0=9.0e-17
-L0=1e9
-
-Diff = 9/20*C0/H**2*(L0**(5/3)) 
 
 @jit
 def TotalFunction(v,z):     #this is the differential equation for the propagation in z-direction of photons
@@ -32,25 +28,20 @@ def TotalFunction(v,z):     #this is the differential equation for the propagati
     v1=v[2]
     v2=v[3]
     v3= np.sqrt(1-v1**2-v2**2)   
-    a1= (1-n1)/H/r1/n1/v3*(x-v1*(v1*x+v2*y+v3*z))
-    a2= (1-n1)/H/r1/n1/v3*(y-v2*(v1*x+v2*y+v3*z))
-    scalar = (1/n1 * sqrt(Diff*n1*v3)* np.random.normal()*H)
-    b1 = a1*scalar
-    b2 = a2*scalar
-    v = [v[2],v[3], a1,a2]
-    b = [b1,b2]
-    return v,b
+    dv11= -eta / H / r1 /n1 * exp(-(r1-R)/H)*(v3*x - v1*z + v2**2*x/v3 - v1*v2*y/v3)
+    dv22 = -eta / H / r1 /n1 * exp(-(r1-R)/H)*(v3*y - v2*z + v1**2*y/v3 - v1*v2*x/v3)
+    v = [v[2],v[3], dv11,dv22]
+    return v
 
 
-beginvalues= [R+1.5e4,0,0,0] #just a test beginvalues, and to create a begin z value
+beginvalues= [6e6,0,0,0] #just a test beginvalues, and to create a begin z value
 
 z0=-np.sqrt((R+10*H)**2-beginvalues[0]**2-beginvalues[1]**2)    #to make sure z starts far from the earth
-n=25     #amount of steps taken in integration method
+n=15     #amount of steps taken in integration method
 zarray= np.linspace(z0, R+10*H,n+1) 
 zspan= np.array([z0, zarray[-1]])
- 
 
-def LeapFrogSolve(dvdz, zspan, v0, n):  # adapted leapfrog integration method
+def LeapFrogSolve(dvdz, zspan, v0, n):  # leapfrog integration method
     
   z0 = zspan[0]
   zstop = zspan[1]
@@ -66,26 +57,16 @@ def LeapFrogSolve(dvdz, zspan, v0, n):  # adapted leapfrog integration method
       v[0,0] = v0[0]
       v[0,1] = v0[1]
       v[0,2] = v0[2]
-      v[0,2] = v0[3]
-      anew, bnew   = dvdz( v[i,:], z[i] )
-
-    else:   #updating all values using the adapted leapfrog
+      v[0,3] = v0[3]
+      anew   = dvdz( v[i,:], z[i] )
+    else:   #updating all values using leapfrog
       z[i]   = z[i-1] + dz
       aold   = anew
-      bold   = bnew
-
-      
-      #updating position
       v[i,0] = v[i-1,0] + dz * ( v[i-1,2] + 0.5 * dz * aold[2] )
       v[i,1] = v[i-1,1] + dz * ( v[i-1,3] + 0.5 * dz * aold[3] )
-      
-      anew, bnew  = dvdz ( v[i,:], z[i] )
-
-      #updating velocities
-      v[i,2] = v[i-1,2] + 0.5  * ( aold[2] + anew[2] )* dz \
-              + 0.5 * (bold[0] + bnew[0]) *sqrt(dz)
-      v[i,3] = v[i-1,3] + 0.5  * ( aold[3] + anew[3] )* dz \
-              + 0.5 * (bold[1] + bnew[1]) *sqrt(dz)
+      anew   = dvdz ( v[i,:], z[i] )
+      v[i,2] = v[i-1,2] + 0.5 * dz * ( aold[2] + anew[2] )
+      v[i,3] = v[i-1,3] + 0.5 * dz * ( aold[3] + anew[3] )
   
   return v
 
@@ -103,7 +84,7 @@ plt.plot(zarray,np.transpose(res)[0])
 ringwidth = 1
 ringarea = np.pi*(2*(R+1.5e4)+ringwidth)*(2)
 rsteps= 2780
-thetasteps=360*2
+thetasteps=2*360
 total_photons= rsteps*thetasteps
 rpar=np.linspace(R+1.5e4-ringwidth, R+1.5e4+ringwidth, rsteps) 
 theta= np.linspace(0,2*np.pi, thetasteps)
@@ -129,20 +110,21 @@ winsound.Beep(freq, duration)
 
 #%% Making a line
 midpoint = int(rsteps*thetasteps/2)
-# t = 1.8e9 - R-10*H
 t= -results[midpoint][0]/results[midpoint][2]
-zeind= t + R+10*H
+zeind= sqrt(results[midpoint][2]**2)*t + R+10*H
 
 #plot_array=results.copy()
 
 x=[]
 y=[]
 for i in range(len(results)):
-
+    #plot_array[i]=np.transpose(results[i])
     
     x.append(t*(results[i][2])+results[i][0]) 
     y.append(t*(results[i][3])+results[i][1])
-
+    #plot_array[i]=np.append(plot_array[i],np.array([[x],[y],[0],[0]]), axis=1)
+    #plottable_array[i]
+    
 zplot=np.append(zarray,zeind)
 fig, ax = plt.subplots()
 ax.plot(x,y, ',')
@@ -168,9 +150,9 @@ ax.set_aspect('equal')
 
 ax.set_xlabel('m')
 ax.set_ylabel('m')
-# plt.savefig('figures/diffusion figures/photonprop_LeapFrog_DIFF'+ str(L0)+'_pixelsize' + \
-#             str(pixelsize)+'_Gridrange_'+str(gridrange) + '_' + str(len(ic)) \
-#             + '_ring_' + str(ringwidth) + '_L = '+str(round(zeind/1e9,2)) + '1e9km'+  'amax'+ str(round(np.amax(plotgrid))) + '.pdf')
+plt.savefig('figures/photonprop_LeapFrog_pixelsize' + \
+            str(pixelsize)+'_Gridrange_'+str(gridrange) + '_' + str(len(ic)) \
+            + '_ring_' + str(ringwidth) + '_L = '+str(round(zeind/1e9,2)) + '1e9km .pdf')
     
 #%% Finding a_max for pixelsizes
 def A_max (pixelsize, gridrange):
@@ -183,7 +165,8 @@ def A_max (pixelsize, gridrange):
     plotgrid = grid*amp_factor
     return np.amax(plotgrid)
 
-
+def f(x,a,b):
+    return a*1/x+b
 pix_size = np.array([1,2,5,10])
 
 fig, axs = plt.subplots(2,2)
@@ -215,20 +198,20 @@ pix_size = np.linspace(1, 25, 100)
 amaxarray = [A_max(i, gridrange) for i in tqdm(pix_size)]
 #%% analysing the data 
 
+popt, pcov = curve_fit(f, pix_size,amaxarray)
 fig, ax= plt.subplots()
 plt.plot(pix_size,amaxarray, '.', color='black')
-
+plt.plot(pix_size, f(pix_size, *popt), '-', color = (0.0,0.651,0.8392))
 ax.set_xlabel('Pixel-width')
 ax.set_ylabel('Maximum amplification')
 plt.tight_layout()
-#plt.savefig('figures/diffusion figures/spherical_Amax_pixelsize_L0'+str(L0)+'.pdf')
-
-#%%
+#plt.savefig('figures/spherical_Amax_pixelsize.pdf)
+#%% using a different f for a loglogplot of amax
 def f(x,a,b):
     return a*x**b
 
 
-#%% analysing the data 
+#%% analysing the data and plotting the loglog plot
 popt2, pcov2 = curve_fit(f, pix_size[:],amaxarray[:])
 fig, ax= plt.subplots()
 plt.loglog(pix_size,amaxarray, '.', color='black')
@@ -236,8 +219,8 @@ plt.loglog(pix_size, f(pix_size, *popt2), '-', color = (0.0,0.651,0.8392))
 ax.set_xlabel('Pixelsize')
 ax.set_ylabel('Maximum amplification')
 plt.tight_layout()
-plt.savefig('figures/ellipsoidal_Amax_pixelsize_loglog_popt: ' +str(popt2) +'.jpg' )#%% R intensity
-intensity = amp_factor*grid
+#plt.savefig('figures/ellipsoidal_Amax_pixelsize_loglog_popt: ' +str(popt2) +'.jpg' )#%% R intensity
+#intensity = amp_factor*grid
 
 
         

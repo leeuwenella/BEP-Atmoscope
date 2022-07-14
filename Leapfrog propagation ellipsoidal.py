@@ -1,26 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Jun 29 15:07:17 2022
+Created on Fri Apr 29 12:36:26 2022
 
 @author: Ella
 """
-
-
 import numpy as np
-from numpy import sqrt, exp
+from numpy import sqrt, exp, cos, sin
 import matplotlib.pyplot as plt
 from time import perf_counter
 import winsound
 from numba import jit
 from tqdm import tqdm
 from scipy.optimize import curve_fit
+plt.close()
 eta= 0.000273
 H=8.5e3
 R= 6e6
-L0= 1e7 
-C0 = 9e-17
 
-Diff = 9/20*C0/H**2*(L0**(5/3))
 a= 6.378e6
 b= 6.356e6
 c= 6.378e6
@@ -29,7 +25,7 @@ def h(x,y,z):
 
 
 @jit
-def TotalFunction(v,z):
+def TotalFunction(v,z): #the equation of motion we're trying to solve
     r1=sqrt(v[0]**2/a**2+v[1]**2/b**2+z**2/c**2)
     x=v[0]
     y=v[1]
@@ -38,25 +34,12 @@ def TotalFunction(v,z):
     v1=v[2]
     v2=v[3]
     v3= sqrt(1-v1**2-v2**2)  
-    a1 = (1-n1)/(v3*n1*H*r1)*(x/a -v1*(v1*x/a + v2*a*y/b**2 + v3*z/a))
-    a2 = (1-n1)/(v3*n1*H*r1)*(y*a/(b**2) -v2*(v1*x/a + v2*a*y/b**2 + v3*z/a))
-    res = [v[2],v[3], a1,a2]
-    scalar = H*sqrt(Diff*n1*v3)*np.random.normal()/n1
-    b1 = a1*scalar
-    b2 = a2*scalar
-    barray = [b1,b2]
-    return res, barray
+    dv11= -eta / H / r1 /n1 * exp(-(h1)/H)*(v3*x/a - v1*z/a + v2**2*x/v3/a - v1*v2*y*a/v3/b**2)
+    dv22 = -eta / H / r1 /n1 * exp(-(h1)/H)*(v3*y*a/b**2 - v2*z/a + v1**2*y*a/v3/b**2 - v1*v2*x/v3/a)
+    res = [v[2],v[3], dv11,dv22]
+    return res
 
-
-
-beginvalues= [6e6,0,0,0]
-
-z0=-np.sqrt((R+10*H)**2-beginvalues[0]**2-beginvalues[1]**2)
-n=25
-zarray= np.linspace(z0, R+10*H,n+1) 
-zspan= np.array([z0, zarray[-1]])
-
-def LeapFrogSolve(dvdz, zspan, v0, n):
+def LeapFrogSolve(dvdz, zspan, v0, n):#using leapfrog to solve the equations of motion
     
   z0 = zspan[0]
   zstop = zspan[1]
@@ -72,22 +55,31 @@ def LeapFrogSolve(dvdz, zspan, v0, n):
       v[0,0] = v0[0]
       v[0,1] = v0[1]
       v[0,2] = v0[2]
-      v[0,2] = v0[3]
-      anew,bnew   = dvdz( v[i,:], z[i] )
-
+      v[0,3] = v0[3]
+      anew   = dvdz( v[i,:], z[i] )
     else:
       z[i]   = z[i-1] + dz
       aold   = anew
-      bold   = bnew
       v[i,0] = v[i-1,0] + dz * ( v[i-1,2] + 0.5 * dz * aold[2] )
       v[i,1] = v[i-1,1] + dz * ( v[i-1,3] + 0.5 * dz * aold[3] )
-      anew,bnew   = dvdz ( v[i,:], z[i] )
-      
-      v[i,2] = v[i-1,2] + 0.5 *  ( aold[2] + anew[2] ) *dz \
-               + 0.5 * (bold[0] + bnew[0]) *sqrt(dz)
-      v[i,3] = v[i-1,3] + 0.5 * ( aold[3] + anew[3] ) * dz \
-              + 0.5 * (bold[1] + bnew[1])*sqrt(dz)
+      anew   = dvdz ( v[i,:], z[i] )
+      v[i,2] = v[i-1,2] + 0.5 * dz * ( aold[2] + anew[2] )
+      v[i,3] = v[i-1,3] + 0.5 * dz * ( aold[3] + anew[3] )
   return v
+
+#%% Testing one light ray
+beginvalues= [6e6,0,0,0]
+
+z0=-np.sqrt((R+10*H)**2-beginvalues[0]**2-beginvalues[1]**2)
+n=15
+zarray= np.linspace(z0, R+10*H,n+1) 
+zspan= np.array([z0, zarray[-1]])
+start= perf_counter()
+
+res=LeapFrogSolve(TotalFunction, np.array([z0,zarray[-1]]), beginvalues, n )
+
+end=perf_counter()
+print("--- %s seconds" % (end-start))
 
 
 #%% Creating the initial conditions
@@ -95,7 +87,7 @@ ringwidth = 110
 rstepsize =2780
 rpar=np.linspace(1.5e4-ringwidth, 1.5e4+ringwidth, rstepsize) 
 
-theta= np.linspace(0,2*np.pi, 360*2)
+theta= np.linspace(0,2*np.pi, 2*360)
 ic=[]
 
 for j in theta:
@@ -109,6 +101,8 @@ total_photons = len(ic)
 #%% All lightrays calculation
 
 start=perf_counter()
+j=0
+
 results=[LeapFrogSolve(TotalFunction, zspan, i, n )[-1] for i in tqdm(ic)]
 end=perf_counter()
 print("--- %s seconds ---" % (end-start))
@@ -117,7 +111,7 @@ duration = 1000  # milliseconds
 freq = 440  # Hz
 winsound.Beep(freq, duration)
 
-#%% Making a line
+#%% Making a line once the light ray leaves the atmosphere and plotting all the end points
 
 midpoint_a = int(len(rpar)/2)
 midpoint_b = int(len(rpar)*0.25*len(theta) + len(rpar)/2)
@@ -130,7 +124,7 @@ zeind= t+ R+10*H
 
 x=[]
 y=[]
-for i in range(len(results)):  
+for i in range(len(results)):
     x.append(t*(results[i][2])+results[i][0]) 
     y.append(t*(results[i][3])+results[i][1])
 
@@ -160,14 +154,16 @@ rx=[]
 ry=[]
 
 ax.set_aspect('equal')
-
 ax.set_xlabel('km')
 ax.set_ylabel('km')
-
-plotgrid = amp_factor*grid
-plt.savefig('figures/diffusion figures/photonprop_LeapFrog_intensity_withcausticsL0' + str(L0) + \
-            str(n) + '_' + str(len(ic))  + '_ring_' + str(ringwidth) + '_pixelsize_' + str(pixelsize)+ 'amax' + str(round(np.amax(plotgrid),3)) +'.pdf')
-#%%
+for i in theta:
+    rx.append(((a**2-b**2)/a*cos(i)**3)/1e3)
+    ry.append(((b**2-a**2)/b*sin(i)**3)/1e3)
+ax.plot(rx,ry)
+   
+#plt.savefig('figures/photonprop_LeapFrog_intensity_withcaustics' + \
+#            str(n) + '_' + str(len(ic))  + '_ring_' + str(ringwidth) + '_pixelsize_' + str(pixelsize)+ '.png')
+#%% Plotting the intensity for different pixelsizes
 pix_size= [450,900,1250,1500]
 fig, axs = plt.subplots(2,2)
 i=0
@@ -194,7 +190,7 @@ for ax in axs.reshape(-1):
     i+=1
 plt.tight_layout()
 
-#%%
+#%% Looking at Amax for different pixelsizes
 def A_max (pixelsize, gridrange):
     gridx = np.arange(-gridrange,gridrange,pixelsize)
     gridy = np.arange(-gridrange,gridrange,pixelsize)
@@ -209,7 +205,7 @@ def f(x,a,b):
     return a*x**b
 pix_size = np.linspace(50, 1000, 100)
 amaxarray = [A_max(i, gridrange) for i in pix_size]
-#%% analysing the data 
+#%% analysing and plotting the data on a loglog plot
 popt2, pcov2 = curve_fit(f, pix_size,amaxarray)
 fig, ax= plt.subplots()
 plt.loglog(pix_size,amaxarray, '.', color='black')
@@ -217,7 +213,7 @@ plt.loglog(pix_size, f(pix_size, *popt2), '-', color = (0.0,0.651,0.8392))
 ax.set_xlabel('Pixelsize')
 ax.set_ylabel('Maximum amplification')
 plt.tight_layout()
-plt.savefig('figures/ellipsoidal_Amax_pixelsize_loglog_popt: ' +str(popt2) +'.jpg' )#%% R intensity
+#plt.savefig('figures/ellipsoidal_Amax_pixelsize_loglog_popt: ' +str(popt2) +'.jpg' )#%% R intensity
 intensity = amp_factor*grid
 
 
